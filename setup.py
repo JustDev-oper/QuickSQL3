@@ -5,13 +5,13 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="QuickSQL3",
-    version="0.1.0",
+    version="0.1.2",
     author="Arthur",
     author_email="itoppro11@gmail.com",
     description="A simple library for working with SQLite3 databases.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/JustDev-oper/easy-sqlite3",
+    url="https://github.com/JustDev-oper/QuickSQL3/",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

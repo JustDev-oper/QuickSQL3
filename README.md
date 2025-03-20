@@ -30,6 +30,8 @@ pip install QuickSQL3
 ### Synchronous Methods
 
 ```python
+from QuickSQL3 import Database
+
 create_table(table_name: str, columns: Dict[str, str]) -> None
 
 insert(table_name: str, data: Dict[str, Any]) -> None
@@ -46,6 +48,8 @@ close() -> None
 ### Asynchronous Methods
 
 ```python
+from QuickSQL3 import AsyncDatabase
+
 create_table(table_name: str, columns: Dict[str, str]) -> None
 
 insert(table_name: str, data: Dict[str, Any]) -> None
@@ -59,13 +63,47 @@ delete(table_name: str, where: str) -> None
 close() -> None
 ```
 
+## Example
+
+```python
+from QuickSQL3 import Database
+
+db = Database("app.db")
+
+db.create_table("users", {
+    "id": "INTEGER PRIMARY KEY",
+    "name": "TEXT",
+    "age": "INTEGER"
+})
+
+db.insert("users", {"name": "Алиса", "age": 25})
+db.insert("users", {"name": "Боб", "age": 30})
+db.insert("users", {"name": "Чарли", "age": 35})
+
+users = db.select("users", where="age > 20")
+print("Пользователи старше 20 лет:")
+for user in users:
+    print(user)
+
+db.update("users", {"age": 26}, where="name = 'Алиса'")
+
+updated_users = db.select("users", where="name = 'Алиса'")
+print("\nОбновленные данные Алисы:")
+for user in updated_users:
+    print(user)
+
+db.delete("users", where="age < 18")
+
+db.close()
+```
+
 ## Contributing
 
 ### Contributions are welcome! Please open an issue or submit a pull request on GitHub.
 
 ## License
 
-### This project is licensed under the MIT License. See the LICENSE file for details.
+### This project is licensed under the MIT License.
 
 ---
 
@@ -95,6 +133,8 @@ pip install QuickSQL3
 ### Синхронные методы
 
 ```python
+from QuickSQL3 import Database
+
 create_table(table_name: str, columns: Dict[str, str]) -> None
 
 insert(table_name: str, data: Dict[str, Any]) -> None
@@ -111,6 +151,8 @@ close() -> None
 ### Асинхронные методы
 
 ```python
+from QuickSQL3 import AsyncDatabase
+
 create_table(table_name: str, columns: Dict[str, str]) -> None
 
 insert(table_name: str, data: Dict[str, Any]) -> None
@@ -124,10 +166,44 @@ delete(table_name: str, where: str) -> None
 close() -> None
 ```
 
+## Пример
+
+```python
+from QuickSQL3 import Database
+
+db = Database("app.db")
+
+db.create_table("users", {
+    "id": "INTEGER PRIMARY KEY",
+    "name": "TEXT",
+    "age": "INTEGER"
+})
+
+db.insert("users", {"name": "Алиса", "age": 25})
+db.insert("users", {"name": "Боб", "age": 30})
+db.insert("users", {"name": "Чарли", "age": 35})
+
+users = db.select("users", where="age > 20")
+print("Пользователи старше 20 лет:")
+for user in users:
+    print(user)
+
+db.update("users", {"age": 26}, where="name = 'Алиса'")
+
+updated_users = db.select("users", where="name = 'Алиса'")
+print("\nОбновленные данные Алисы:")
+for user in updated_users:
+    print(user)
+
+db.delete("users", where="age < 18")
+
+db.close()
+```
+
 ## Участие
 
 ### Мы приветствуем ваши contributions! Пожалуйста, создайте issue или отправьте pull request на GitHub.
 
 ## Лицензия
 
-### Этот проект лицензирован под MIT License. Подробнее см. в файле LICENSE.
+### Этот проект лицензирован под MIT License.
