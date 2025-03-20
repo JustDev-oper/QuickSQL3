@@ -1,4 +1,4 @@
-from QuickSQL3.easy_sql import Database
+from QuickSQL3 import Database
 
 # Создаем базу данных (файл "app.db" будет создан автоматически)
 db = Database("app.db")
