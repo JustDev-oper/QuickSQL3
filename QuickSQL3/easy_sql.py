@@ -382,6 +382,3 @@ class Database:
             self.connection.commit()
         except sqlite3.Error as e:
             raise sqlite3.Error(f"Error deleting records: {e}")
-
-
-db = Database("app.db")
