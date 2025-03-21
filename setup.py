@@ -5,7 +5,7 @@ with open("README.md", "r", encoding="utf-8") as f:
 
 setup(
     name="QuickSQL3",
-    version="0.1.2",
+    version="0.1.3",
     author="Arthur",
     author_email="itoppro11@gmail.com",
     description="A simple library for working with SQLite3 databases.",

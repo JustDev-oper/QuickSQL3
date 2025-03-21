@@ -1,5 +1,5 @@
 import sqlite3
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict, Optional, Union
 
 
 class Database:
@@ -35,7 +35,6 @@ class Database:
         Closes the connection to the database.
         """
         self.connection.close()
-        print("Database connection closed.")
 
     ### Misc - End ####
 
@@ -61,7 +60,7 @@ class Database:
         self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
         return list(map(lambda row: row[0], list(self.cursor.fetchall())))
 
-    def read_columns(self, table_name: str) -> List[tuple] | str:
+    def read_columns(self, table_name: str) -> Union[List[tuple], str]:
         """
     Retrieves metadata about the columns of a specified table.
 
@@ -99,7 +98,7 @@ class Database:
         except sqlite3.Error as e:
             print(f"Error | Method - read_columns: {str(e)}")
 
-    def read_table_records(self, table_name: str) -> List[tuple] | str:
+    def read_table_records(self, table_name: str) -> Union[List[tuple], str]:
         try:
             self.cursor.execute(f"SELECT * FROM {table_name}")
             return self.cursor.fetchall()
@@ -166,7 +165,6 @@ class Database:
             try:
                 self.cursor.execute(query)
                 self.connection.commit()
-                print(f"Column '{column_name}' added to table '{table_name}' successfully.")
             except sqlite3.Error as e:
                 raise sqlite3.Error(f"Error adding column '{column_name}': {e}")
 
