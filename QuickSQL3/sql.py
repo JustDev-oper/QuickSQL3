@@ -1,382 +1,607 @@
+import re
 import sqlite3
-from typing import List, Any, Dict, Optional, Union
+import logging
+from typing import List, Any, Dict, Optional, Union, Tuple
 
 
 class Database:
     def __init__(self, db_path: str) -> None:
-        self.connection = sqlite3.connect(db_path)
-        self.cursor = self.connection.cursor()
-
-    ### Misc - Start ###
-    def command(self, command: str) -> None:
         """
-        Executes a custom SQL command on the SQLite database.
-
-        This method allows you to execute any valid SQL command (e.g., CREATE, INSERT, UPDATE, DELETE, etc.).
-        Use it for advanced operations that are not covered by other methods in the class.
+        Initializes a new database connection and sets up logging.
 
         Args:
-            command (str): The SQL command to be executed.
-
-        Returns:
-            None
+            db_path: Path to the SQLite database file
 
         Raises:
-            sqlite3.Error: If an error occurs while executing the SQL command (e.g., syntax error, table does not exist).
+            sqlite3.Error: If connection to the database fails
+
+        Example:
+            >>> db = Database("example.db")
+        """
+        self.logger = logging.getLogger(__name__)
+        self.logger.setLevel(logging.INFO)
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        self.logger.addHandler(handler)
+
+        try:
+            self.connection = sqlite3.connect(db_path)
+            self.cursor = self.connection.cursor()
+            self.logger.info(f"Successfully connected to database at {db_path}")
+        except sqlite3.Error as e:
+            self.logger.error(f"Failed to connect to database: {str(e)}")
+            raise
+
+    def command(
+            self,
+            sql: str,
+            params: Optional[Union[Tuple, Dict[str, Any]]] = None,
+            *,
+            executemany: bool = False,
+            many_params: Optional[List[Union[Tuple, Dict[str, Any]]]] = None,
+            fetch: bool = False,
+            fetch_all: bool = False,
+            commit: bool = True
+    ) -> Optional[Union[List[Dict[str, Any]], List[Tuple], Dict[str, Any], Tuple, Any]]:
+        """
+        Executes SQL command with flexible options for different use cases.
+
+        Args:
+            sql: SQL command to execute
+            params: Parameters for the query (tuple for positional, dict for named)
+            executemany: If True, executes executemany with parameters from many_params
+            many_params: Sequence of parameters for executemany
+            fetch: If True, returns first row of results (after commit if commit=True)
+            fetch_all: If True, returns all rows of results
+            commit: If True, commits the transaction
+
+        Returns:
+            Depending on options:
+            - None if just executing
+            - Single row if fetch=True
+            - List of rows if fetch_all=True or executemany=True
+
+        Raises:
+            ValueError: For invalid arguments
+            sqlite3.Error: For database errors
+
+        Examples:
+            # Simple execution
+            db.command("CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)")
+
+            # With parameters
+            db.command("INSERT INTO users VALUES (?, ?)", (1, "Alice"))
+
+            # Named parameters
+            db.command("INSERT INTO users VALUES (:id, :name)", {"id": 2, "name": "Bob"})
+
+            # Batch insert
+            db.command(
+                "INSERT INTO users VALUES (?, ?)",
+                executemany=True,
+                many_params=[(3, "Charlie"), (4, "David")]
+            )
+
+            # Fetch single row
+            user = db.command("SELECT * FROM users WHERE id = ?", (1,), fetch=True)
+
+            # Fetch all rows
+            users = db.command("SELECT * FROM users", fetch_all=True)
+
+            # Without auto-commit
+            db.command("BEGIN")
+            try:
+                db.command("INSERT INTO users VALUES (5, 'Eve')", commit=False)
+                db.command("COMMIT")
+            except:
+                db.command("ROLLBACK")
+                raise
         """
         try:
-            self.cursor.execute(command)
-            self.connection.commit()
-        except sqlite3.Error as e:
-            print(f"Error | Method - command: {str(e)}")
+            if not sql or not isinstance(sql, str):
+                raise ValueError("SQL must be a non-empty string")
+
+            if executemany:
+                if not many_params:
+                    raise ValueError("many_params required when executemany=True")
+                if params:
+                    raise ValueError("Use either params or many_params, not both")
+            elif many_params:
+                raise ValueError("many_params provided but executemany=False")
+
+            if fetch and fetch_all:
+                raise ValueError("Use either fetch or fetch_all, not both")
+
+            if executemany:
+                self.cursor.executemany(sql, many_params)
+                result = None
+            elif params:
+                self.cursor.execute(sql, params)
+            else:
+                self.cursor.execute(sql)
+
+            if commit:
+                self.connection.commit()
+
+            if fetch:
+                row = self.cursor.fetchone()
+                if row and self.cursor.description:
+                    columns = [col[0] for col in self.cursor.description]
+                    result = dict(zip(columns, row))
+                else:
+                    result = row
+            elif fetch_all:
+                rows = self.cursor.fetchall()
+                if rows and self.cursor.description:
+                    columns = [col[0] for col in self.cursor.description]
+                    result = [dict(zip(columns, row)) for row in rows]
+                else:
+                    result = rows
+            else:
+                result = None
+
+            self.logger.debug(
+                f"Executed command: {sql}\n"
+                f"Params: {params or many_params}\n"
+                f"Options: fetch={fetch}, fetch_all={fetch_all}, commit={commit}\n"
+                f"Result: {result if result is not None else 'None'}"
+            )
+
+            return result
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(
+                f"Command failed: {sql}\n"
+                f"Params: {params or many_params}\n"
+                f"Error: {str(e)}"
+            )
+            if isinstance(e, ValueError):
+                raise ValueError(f"Command error: {str(e)}") from e
+            else:
+                if commit:  # Only rollback if we were supposed to commit
+                    self.connection.rollback()
+                raise sqlite3.Error(f"Database error: {str(e)}") from e
 
     def close(self) -> None:
         """
-        Closes the connection to the database.
-        """
-        self.connection.close()
+        Closes the database connection gracefully.
 
-    ### Misc - End ####
+        Raises:
+            sqlite3.Error: If closing the connection fails
+
+        Example:
+            >>> db.close()
+        """
+        try:
+            self.connection.close()
+            self.logger.info("Database connection closed")
+        except sqlite3.Error as e:
+            self.logger.error(f"Error closing connection: {str(e)}")
+            raise sqlite3.Error(f"Error closing connection: {str(e)}") from e
 
     def read_tables(self) -> List[str]:
         """
-            Retrieves a list of all tables in the current SQLite database.
+        Retrieves names of all tables in the database.
 
-            This method queries the `sqlite_master` system table, which contains metadata about all
-            database objects (tables, indexes, etc.). It filters the results to return only the names
-            of tables (excluding views, indexes, etc.).
+        Returns:
+            List of table names as strings
 
-            Returns:
-                List[str]: A list of table names in the database. If no tables exist, an empty list is returned.
+        Raises:
+            sqlite3.Error: If query execution fails
 
-            Example:
-                --> db = DataBase("example.db")
-                --> db.read_tables()
-                ['users', 'products', 'orders']
-
-                --> db.read_tables()  # No tables in the database
-                []
-            """
-        self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        return list(map(lambda row: row[0], list(self.cursor.fetchall())))
-
-    def read_columns(self, table_name: str) -> Union[List[tuple], str]:
+        Example:
+            >>> tables = db.read_tables()
+            >>> print(tables)
+            ['users', 'products']
         """
-    Retrieves metadata about the columns of a specified table.
-
-    This method executes the SQLite `PRAGMA table_info(table_name)` command, which returns
-    a list of tuples containing information about each column in the table, such as its name,
-    data type, whether it can be NULL, and whether it is part of the primary key.
-
-    Args:
-        table_name (str): The name of the table for which to retrieve column information.
-
-    Returns:
-        List[tuple] | str:
-            - If successful, returns a list of tuples, where each tuple represents a column.
-              Each tuple contains the following elements:
-                - 0: Column index (starting from 0).
-                - 1: Column name.
-                - 2: Column data type.
-                - 3: Whether the column can be NULL (0 = no, 1 = yes).
-                - 4: Default value of the column (or None if not specified).
-                - 5: Whether the column is part of the primary key (0 = no, 1 = yes).
-            - If an error occurs (e.g., the table does not exist), returns an error message as a string.
-
-    Example:
-        --> db = DataBase("example.db")
-        --> db.read_columns("users")
-        [(0, 'id', 'INTEGER', 1, None, 1), (1, 'name', 'TEXT', 1, None, 0)]
-
-        --> db.read_columns("non_existent_table")
-        "Error! Check your table name."
-    """
         try:
+            self.cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+            tables = [row[0] for row in self.cursor.fetchall()]
+            self.logger.info(f"Retrieved tables: {tables}")
+            return tables
+        except sqlite3.Error as e:
+            self.logger.error(f"Error reading tables: {str(e)}")
+            raise sqlite3.Error(f"Error reading tables: {str(e)}") from e
+
+    def read_columns(self, table_name: str) -> List[Tuple]:
+        """
+        Retrieves column information for a specific table.
+
+        Args:
+            table_name: Name of the table to inspect
+
+        Returns:
+            List of tuples with column info (cid, name, type, notnull, dflt_value, pk)
+
+        Raises:
+            ValueError: If table_name is invalid
+            sqlite3.Error: If table doesn't exist or query fails
+
+        Example:
+            >>> columns = db.read_columns("users")
+            >>> for col in columns:
+            ...     print(col[1], col[2])  # name and type
+        """
+        try:
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
+
             self.cursor.execute(f"PRAGMA table_info({table_name})")
-            return self.cursor.fetchall()
-
+            columns = self.cursor.fetchall()
+            self.logger.info(f"Retrieved columns for table '{table_name}': {columns}")
+            return columns
         except sqlite3.Error as e:
-            print(f"Error | Method - read_columns: {str(e)}")
-
-    def read_table_records(self, table_name: str) -> Union[List[tuple], str]:
-        try:
-            self.cursor.execute(f"SELECT * FROM {table_name}")
-            return self.cursor.fetchall()
-        except sqlite3.Error as e:
-            print(f"Error | Method - read_table_records: {str(e)}")
+            self.logger.error(f"Error reading columns from table '{table_name}': {str(e)}")
+            raise sqlite3.Error(f"Error reading columns: {str(e)}") from e
 
     def create_table(self, table_name: str, columns: Dict[str, str]) -> None:
         """
-        Creates a new table in the database.
+        Creates a new table with specified columns.
 
         Args:
-            table_name (str): The name of the table to be created.
-            columns (Dict[str, str]): A dictionary where keys are column names and values are column types.
+            table_name: Name of the table to create
+            columns: Dictionary mapping column names to SQL types
+                    (e.g., {"id": "INTEGER PRIMARY KEY", "name": "TEXT"})
 
         Raises:
-            ValueError: If the table name or columns are invalid.
-            sqlite3.Error: If an error occurs while executing the SQL command.
+            ValueError: If arguments are invalid
+            sqlite3.Error: If table creation fails
+
+        Example:
+            >>> db.create_table("users", {
+            ...     "id": "INTEGER PRIMARY KEY AUTOINCREMENT",
+            ...     "name": "TEXT NOT NULL",
+            ...     "age": "INTEGER"
+            ... })
         """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        if not columns or not isinstance(columns, dict):
-            raise ValueError("Columns must be a non-empty dictionary.")
-
-        columns_with_types = ", ".join([f"{name} {type}" for name, type in columns.items()])
-        query = f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_with_types})"
-
         try:
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
+
+            if not columns or not isinstance(columns, dict):
+                raise ValueError("Columns must be a non-empty dictionary")
+
+            columns_def = ", ".join([f"{name} {type}" for name, type in columns.items()])
+            query = f"CREATE TABLE IF NOT EXISTS {table_name} ({columns_def})"
+
             self.cursor.execute(query)
             self.connection.commit()
-        except sqlite3.Error as e:
-            raise sqlite3.Error(f"Error creating table: {e}")
+            self.logger.info(f"Created table '{table_name}' with columns: {columns}")
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error creating table '{table_name}': {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Error creating table: {str(e)}") from e
 
-    def add_column(self, table_name: str, columns: Dict[str, str]) -> None:
+    def insert(self, table_name: str, data: Dict[str, Any]) -> int:
         """
-        Adds one or more columns to an existing table.
+        Inserts a new record into the specified table.
 
         Args:
-            table_name (str): The name of the table to which the columns will be added.
-            columns (Dict[str, str]): A dictionary where keys are column names and values are column types.
-
-        Raises:
-            ValueError: If the table name or columns are invalid.
-            sqlite3.Error: If an error occurs while executing the SQL command.
-        """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        if not columns or not isinstance(columns, dict):
-            raise ValueError("Columns must be a non-empty dictionary.")
-
-        self.cursor.execute(f"PRAGMA table_info({table_name})")
-        existing_columns = [row[1] for row in self.cursor.fetchall()]
-
-        if not existing_columns:
-            raise ValueError(f"Table '{table_name}' does not exist.")
-
-        for column_name, column_type in columns.items():
-            if column_name in existing_columns:
-                print(f"Column '{column_name}' already exists in table '{table_name}'. Skipping.")
-                continue
-
-            query = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}"
-            try:
-                self.cursor.execute(query)
-                self.connection.commit()
-            except sqlite3.Error as e:
-                raise sqlite3.Error(f"Error adding column '{column_name}': {e}")
-
-    def insert(self, table_name: str, data: Dict[str, Any]) -> None:
-        """
-    Inserts a new record into the specified table.
-
-    Args:
-        table_name (str): The name of the table.
-        data (Dict[str, Any]): A dictionary where keys are column names and values are the data to insert.
-
-    Raises:
-        ValueError: If the table name or data is invalid.
-        sqlite3.Error: If an error occurs while executing the SQL command.
-
-    Example:
-        # Insert a single record
-        db.insert("users", {"name": "Alice", "age": 25})
-
-        # Insert multiple records (using a loop)
-        records = [
-            {"name": "Bob", "age": 30},
-            {"name": "Charlie", "age": 35},
-        ]
-        for record in records:
-            db.insert("users", record)
-    """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        if not data or not isinstance(data, dict):
-            raise ValueError("Data must be a non-empty dictionary.")
-
-        columns = ", ".join(data.keys())
-        placeholders = ", ".join("?" * len(data))
-        query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
-
-        try:
-            self.cursor.execute(query, tuple(data.values()))
-            self.connection.commit()
-        except sqlite3.Error as e:
-            raise sqlite3.Error(f"Error inserting record: {e}")
-
-    def select(self, table_name: str, where: Optional[str] = None) -> List[Dict[str, Any]]:
-        """
-        Selects records from the specified table.
-
-        Args:
-            table_name (str): The name of the table.
-            where (Optional[str]): The WHERE clause to filter records (e.g., "age > 20").
+            table_name: Name of the target table
+            data: Dictionary of column-value pairs to insert
 
         Returns:
-            List[Dict[str, Any]]: A list of dictionaries representing the selected records.
+            The rowid of the inserted record
 
         Raises:
-            ValueError: If the table name is invalid.
-            sqlite3.Error: If an error occurs while executing the SQL command.
+            ValueError: If arguments are invalid
+            sqlite3.Error: If insertion fails
+
+        Example:
+            >>> rowid = db.insert("users", {"name": "Alice", "age": 30})
+            >>> print(f"Inserted record with ID: {rowid}")
         """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        query = f"SELECT * FROM {table_name}"
-        if where:
-            query += f" WHERE {where}"
-
         try:
-            self.cursor.execute(query)
-            rows = self.cursor.fetchall()
-            columns = [column[0] for column in self.cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
-        except sqlite3.Error as e:
-            raise sqlite3.Error(f"Error selecting records: {e}")
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
 
-    def edit_table_name(self, table_name: str, new_table_name: str) -> None:
-        """
-            Renames an existing table in the SQLite database.
+            if not data or not isinstance(data, dict):
+                raise ValueError("Data must be a non-empty dictionary")
 
-            Args:
-                table_name (str): The current name of the table to be renamed.
-                new_table_name (str): The new name for the table.
+            columns = ", ".join(data.keys())
+            placeholders = ", ".join("?" * len(data))
+            query = f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})"
 
-            Returns:
-                None
-
-            Raises:
-                sqlite3.Error: If an error occurs while executing the SQL command (e.g., the table does not exist
-                               or the new table name is already in use).
-            """
-        try:
-            self.cursor.execute(f"ALTER TABLE {table_name} RENAME TO {new_table_name}")
-            self.connection.commit()
-        except sqlite3.Error as e:
-            print(f"Error | Method - edit_table_name: {str(e)}")
-
-    def edit_column_name(self, table_name: str, column_name: str, new_column_name: str) -> None:
-        """
-            Renames a column in an existing table in the SQLite database.
-
-            Args:
-                table_name (str): The name of the table containing the column to be renamed.
-                column_name (str): The current name of the column.
-                new_column_name (str): The new name for the column.
-
-            Returns:
-                None
-
-            Raises:
-                sqlite3.Error: If an error occurs while executing the SQL command (e.g., the table or column does not exist
-                               or the new column name is already in use).
-            """
-        try:
-            self.cursor.execute(f"ALTER TABLE {table_name} RENAME COLUMN {column_name} TO {new_column_name}")
-            self.connection.commit()
-        except sqlite3.Error as e:
-            print(f"Error | Method - edit_column_name: {str(e)}")
-
-    def update(self, table_name: str, data: Dict[str, Any], where: str) -> None:
-        """
-        Updates records in the specified table.
-
-        Args:
-            table_name (str): The name of the table.
-            data (Dict[str, Any]): A dictionary where keys are column names and values are the new data.
-            where (str): The WHERE clause to specify which records to update (e.g., "name = 'Alice'").
-
-        Raises:
-            ValueError: If the table name, data, or WHERE clause is invalid.
-            sqlite3.Error: If an error occurs while executing the SQL command.
-        """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        if not data or not isinstance(data, dict):
-            raise ValueError("Data must be a non-empty dictionary.")
-
-        if not where or not isinstance(where, str):
-            raise ValueError("WHERE clause must be a non-empty string.")
-
-        set_clause = ", ".join([f"{key} = ?" for key in data.keys()])
-        query = f"UPDATE {table_name} SET {set_clause} WHERE {where}"
-
-        try:
             self.cursor.execute(query, tuple(data.values()))
             self.connection.commit()
-        except sqlite3.Error as e:
-            raise sqlite3.Error(f"Error updating records: {e}")
+            rowid = self.cursor.lastrowid
+            self.logger.info(f"Inserted record into '{table_name}' with ID {rowid}")
+            return rowid
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error inserting into '{table_name}': {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Error inserting record: {str(e)}") from e
 
-    def delete_table(self, table_name: str) -> None:
+    def select(
+            self,
+            table_name: str,
+            where: Optional[str] = None,
+            params: Optional[Union[Tuple, Dict[str, Any]]] = None,
+            columns: Optional[List[str]] = None,
+            order_by: Optional[str] = None,
+            limit: Optional[int] = None,
+            offset: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
-            Deletes a table from the SQLite database.
-
-            Args:
-                table_name (str): The name of the table to be deleted.
-
-            Returns:
-                None
-
-            Raises:
-                sqlite3.Error: If an error occurs while executing the SQL command (e.g., the table does not exist).
-            """
-        try:
-            self.cursor.execute(f"DROP TABLE {table_name}")
-            self.connection.commit()
-
-        except sqlite3.Error as e:
-            return print(f"Error | Method - delete_table: {str(e)}")
-
-    def delete_column(self, table_name: str, column_name: str) -> None:
-        """
-            Deletes a column from an existing table in the SQLite database.
-
-            Args:
-                table_name (str): The name of the table from which the column will be deleted.
-                column_name (str): The name of the column to be deleted.
-
-            Returns:
-                None
-
-            Raises:
-                sqlite3.Error: If an error occurs while executing the SQL command (e.g., the table or column does not exist).
-                              Note: SQLite does not support dropping columns directly. This operation requires creating a new table
-                              without the column, copying data, and renaming the table.
-            """
-        try:
-            self.cursor.execute(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
-            self.connection.commit()
-
-        except sqlite3.Error as e:
-            return print(f"Error | Method - delete_column: {str(e)}")
-
-    def delete(self, table_name: str, where: str) -> None:
-        """
-        Deletes records from the specified table.
+        Retrieves records from the specified table with optional filtering and sorting.
 
         Args:
-            table_name (str): The name of the table.
-            where (str): The WHERE clause to specify which records to delete (e.g., "age < 18").
+            table_name: Name of the table to query
+            where: WHERE clause with placeholders (use ? or :name)
+            params: Parameters for the WHERE clause
+            columns: List of columns to select (None for all)
+            order_by: Column(s) to order by (e.g., "name DESC")
+            limit: Maximum number of records to return
+            offset: Number of records to skip
+
+        Returns:
+            List of dictionaries representing the records
 
         Raises:
-            ValueError: If the table name or WHERE clause is invalid.
-            sqlite3.Error: If an error occurs while executing the SQL command.
+            ValueError: If arguments are invalid
+            sqlite3.Error: If query execution fails
+
+        Examples:
+            >>> # Get all users
+            >>> users = db.select("users")
+
+            >>> # Get specific columns with filtering
+            >>> active_users = db.select(
+            ...     "users",
+            ...     where="status = ? AND age > ?",
+            ...     params=("active", 18),
+            ...     columns=["id", "name"],
+            ...     order_by="name ASC",
+            ...     limit=10
+            ... )
         """
-        if not table_name or not isinstance(table_name, str):
-            raise ValueError("Table name must be a non-empty string.")
-
-        if not where or not isinstance(where, str):
-            raise ValueError("WHERE clause must be a non-empty string.")
-
-        query = f"DELETE FROM {table_name} WHERE {where}"
-
         try:
+            if not isinstance(table_name, str) or not table_name.strip():
+                raise ValueError("Table name must be a non-empty string")
+
+            if where and not isinstance(where, str):
+                raise ValueError("WHERE clause must be a string")
+
+            if params and not isinstance(params, (tuple, dict)):
+                raise ValueError("Parameters must be a tuple or dictionary")
+
+            # Build the SELECT query
+            selected_columns = ", ".join(columns) if columns else "*"
+            query = f"SELECT {selected_columns} FROM {table_name}"
+
+            # Add WHERE clause if provided
+            if where:
+                query += f" WHERE {where}"
+                if params:
+                    if isinstance(params, tuple) and where.count("?") != len(params):
+                        raise ValueError("Parameter count doesn't match placeholders")
+                    elif isinstance(params, dict):
+                        missing = [k for k in params if f":{k}" not in where]
+                        if missing:
+                            raise ValueError(f"Missing placeholders for: {missing}")
+
+            # Add ORDER BY if specified
+            if order_by:
+                if not re.match(r"^[\w,\s]+$", order_by):
+                    raise ValueError("Invalid characters in ORDER BY clause")
+                query += f" ORDER BY {order_by}"
+
+            # Add LIMIT and OFFSET if specified
+            if limit is not None:
+                if not isinstance(limit, int) or limit < 0:
+                    raise ValueError("LIMIT must be a non-negative integer")
+                query += f" LIMIT {limit}"
+
+                if offset is not None:
+                    if not isinstance(offset, int) or offset < 0:
+                        raise ValueError("OFFSET must be a non-negative integer")
+                    query += f" OFFSET {offset}"
+
+            self.logger.debug(f"Executing query: {query} with params: {params}")
+
+            # Execute the query
+            if params:
+                self.cursor.execute(query, params)
+            else:
+                self.cursor.execute(query)
+
+            # Format results
+            rows = self.cursor.fetchall()
+            column_names = [col[0] for col in self.cursor.description]
+            result = [dict(zip(column_names, row)) for row in rows]
+
+            self.logger.info(f"Selected {len(result)} records from '{table_name}'")
+            return result
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error selecting from '{table_name}': {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(f"Selection error: {str(e)}") from e
+            else:
+                raise sqlite3.Error(f"Database error: {str(e)}") from e
+
+    def update(self, table_name: str, data: Dict[str, Any], where: str, params: Optional[Tuple] = None) -> int:
+        """
+        Updates records matching the specified conditions.
+
+        Args:
+            table_name: Name of the table to update
+            data: Dictionary of column-value pairs to update
+            where: WHERE clause identifying records to update
+            params: Additional parameters for WHERE clause
+
+        Returns:
+            Number of rows affected
+
+        Raises:
+            ValueError: If arguments are invalid
+            sqlite3.Error: If update fails
+
+        Example:
+            >>> count = db.update(
+            ...     "users",
+            ...     {"status": "inactive", "last_updated": datetime.now()},
+            ...     where="last_login < ?",
+            ...     params=(datetime(2020, 1, 1),)
+            ... )
+            >>> print(f"Updated {count} records")
+        """
+        try:
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
+
+            if not data or not isinstance(data, dict):
+                raise ValueError("Data must be a non-empty dictionary")
+
+            if not where or not isinstance(where, str):
+                raise ValueError("WHERE clause must be a non-empty string")
+
+            set_clause = ", ".join([f"{k} = ?" for k in data.keys()])
+            query = f"UPDATE {table_name} SET {set_clause} WHERE {where}"
+
+            # Combine data values with additional params
+            values = tuple(data.values()) + (params if params else ())
+
+            self.cursor.execute(query, values)
+            self.connection.commit()
+            count = self.cursor.rowcount
+            self.logger.info(f"Updated {count} rows in '{table_name}'")
+            return count
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error updating '{table_name}': {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Update error: {str(e)}") from e
+
+    def delete(self, table_name: str, where: str, params: Optional[Tuple] = None) -> int:
+        """
+        Deletes records matching the specified conditions.
+
+        Args:
+            table_name: Name of the table to delete from
+            where: WHERE clause identifying records to delete
+            params: Parameters for WHERE clause
+
+        Returns:
+            Number of rows deleted
+
+        Raises:
+            ValueError: If arguments are invalid
+            sqlite3.Error: If deletion fails
+
+        Example:
+            >>> count = db.delete(
+            ...     "users",
+            ...     where="status = ? AND last_login < ?",
+            ...     params=("inactive", datetime(2019, 1, 1))
+            ... )
+            >>> print(f"Deleted {count} inactive users")
+        """
+        try:
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
+
+            if not where or not isinstance(where, str):
+                raise ValueError("WHERE clause must be a non-empty string")
+
+            query = f"DELETE FROM {table_name} WHERE {where}"
+
+            self.cursor.execute(query, params if params else ())
+            self.connection.commit()
+            count = self.cursor.rowcount
+            self.logger.info(f"Deleted {count} rows from '{table_name}'")
+            return count
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error deleting from '{table_name}': {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Deletion error: {str(e)}") from e
+
+    def edit_table_name(self, old_name: str, new_name: str) -> None:
+        """
+        Renames an existing table.
+
+        Args:
+            old_name: Current table name
+            new_name: New table name
+
+        Raises:
+            ValueError: If names are invalid
+            sqlite3.Error: If renaming fails
+
+        Example:
+            >>> db.edit_table_name("old_users", "users")
+        """
+        try:
+            if not old_name or not isinstance(old_name, str):
+                raise ValueError("Old table name must be a non-empty string")
+
+            if not new_name or not isinstance(new_name, str):
+                raise ValueError("New table name must be a non-empty string")
+
+            query = f"ALTER TABLE {old_name} RENAME TO {new_name}"
             self.cursor.execute(query)
             self.connection.commit()
-        except sqlite3.Error as e:
-            raise sqlite3.Error(f"Error deleting records: {e}")
+            self.logger.info(f"Renamed table '{old_name}' to '{new_name}'")
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error renaming table: {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Rename error: {str(e)}") from e
+
+    def add_column(self, table_name: str, column_def: Dict[str, str]) -> None:
+        """
+        Adds a new column to an existing table.
+
+        Args:
+            table_name: Name of the target table
+            column_def: Dictionary mapping column names to definitions
+                      (e.g., {"email": "TEXT UNIQUE"})
+
+        Raises:
+            ValueError: If arguments are invalid or column exists
+            sqlite3.Error: If operation fails
+
+        Example:
+            >>> db.add_column("users", {"email": "TEXT NOT NULL UNIQUE"})
+        """
+        try:
+            if not table_name or not isinstance(table_name, str):
+                raise ValueError("Table name must be a non-empty string")
+
+            if not column_def or not isinstance(column_def, dict):
+                raise ValueError("Column definition must be a non-empty dictionary")
+
+            # Check if table exists
+            if table_name not in self.read_tables():
+                raise ValueError(f"Table '{table_name}' does not exist")
+
+            # Get existing columns
+            existing_columns = [col[1] for col in self.read_columns(table_name)]
+
+            for col_name, col_type in column_def.items():
+                if col_name in existing_columns:
+                    raise ValueError(f"Column '{col_name}' already exists in '{table_name}'")
+
+                query = f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"
+                self.cursor.execute(query)
+                self.connection.commit()
+                self.logger.info(f"Added column '{col_name}' to '{table_name}'")
+
+        except (ValueError, sqlite3.Error) as e:
+            self.logger.error(f"Error adding column: {str(e)}")
+            if isinstance(e, ValueError):
+                raise ValueError(str(e)) from e
+            else:
+                raise sqlite3.Error(f"Add column error: {str(e)}") from e

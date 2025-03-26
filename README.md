@@ -6,20 +6,20 @@
 
 ## English <a name="english"></a>
 
-QuickSQL3 is a Python library designed to simplify working with SQLite databases. It provides an intuitive API for
-performing common database operations such as creating tables, inserting data, querying, updating, and deleting records.
-The library is ideal for beginners or those who want to avoid writing raw SQL queries.
+QuickSQL3 is a Python library designed to simplify working with SQLite databases. It provides both synchronous and asynchronous APIs for performing common database operations with SQLite. The library is ideal for developers who want an intuitive interface for database operations without writing raw SQL queries.
 
 ## Features
 
-- **Simple API**: Easily create tables, insert data, and query records without writing SQL.
-- **Error Handling**: Built-in error handling to help you debug issues.
-- **Flexible**: Supports both synchronous and asynchronous operations.
-- **Type Annotations**: Fully typed for better code clarity and IDE support.
+- **Dual APIs**: Choose between synchronous (`Database`) and asynchronous (`AsyncDatabase`) interfaces
+- **Comprehensive CRUD**: Create, Read, Update, Delete operations with simple method calls
+- **Schema Management**: Create tables, alter columns, rename tables, and more
+- **Type Safety**: Full type annotations for better code clarity and IDE support
+- **Error Handling**: Built-in error handling with detailed logging
+- **Flexible Querying**: Support for WHERE clauses, parameterized queries, sorting, and pagination
 
 ## Installation
 
-You can install the library using pip:
+Install using pip:
 
 ```bash
 pip install QuickSQL3
@@ -27,102 +27,115 @@ pip install QuickSQL3
 
 ## Documentation
 
-### Synchronous Methods
+### Synchronous API (`Database`)
 
 ```python
 from QuickSQL3 import Database
 
-create_table(table_name: str, columns: Dict[str, str]) -> None
+# Initialize database
+db = Database("app.db")
 
-insert(table_name: str, data: Dict[str, Any]) -> None
+# Table operations
+db.create_table("users", {"id": "INTEGER PRIMARY KEY", "name": "TEXT"})
+db.edit_table_name("users", "customers")
+db.add_column("customers", {"email": "TEXT UNIQUE"})
 
-select(table_name: str, where: Optional[str] = None) -> List[Dict[str, Any]]
+# Data operations
+row_id = db.insert("customers", {"name": "Alice", "email": "alice@example.com"})
+results = db.select("customers", where="name LIKE ?", params=("A%",))
+db.update("customers", {"email": "new@example.com"}, where="id = ?", params=(row_id,))
+db.delete("customers", where="id = ?", params=(row_id,))
 
-update(table_name: str, data: Dict[str, Any], where: str) -> None
-
-delete(table_name: str, where: str) -> None
-
-close() -> None
+# Close connection
+db.close()
 ```
 
-### Asynchronous Methods
+### Asynchronous API (`AsyncDatabase`)
 
 ```python
 from QuickSQL3 import AsyncDatabase
 
-create_table(table_name: str, columns: Dict[str, str]) -> None
-
-insert(table_name: str, data: Dict[str, Any]) -> None
-
-select(table_name: str, where: Optional[str] = None) -> List[Dict[str, Any]]
-
-update(table_name: str, data: Dict[str, Any], where: str) -> None
-
-delete(table_name: str, where: str) -> None
-
-close() -> None
+async def main():
+    # Initialize database
+    db = AsyncDatabase("app.db")
+    await db.connect()
+    
+    # Table operations
+    await db.create_table("products", {"id": "INTEGER PRIMARY KEY", "name": "TEXT"})
+    await db.edit_column_name("products", "name", "product_name")
+    
+    # Data operations
+    await db.insert("products", {"product_name": "Laptop"})
+    results = await db.select("products")
+    
+    # Close connection
+    await db.close()
 ```
 
-## Example
+## Examples
+
+### Basic Usage
 
 ```python
 from QuickSQL3 import Database
 
-db = Database("app.db")
+with Database("example.db") as db:
+    # Create table
+    db.create_table("employees", {
+        "id": "INTEGER PRIMARY KEY",
+        "name": "TEXT NOT NULL",
+        "salary": "REAL"
+    })
+    
+    # Insert data
+    db.insert("employees", {"name": "John Doe", "salary": 75000.50})
+    
+    # Query data
+    employees = db.select("employees", where="salary > ?", params=(50000,))
+    print(employees)
+```
 
-db.create_table("users", {
-    "id": "INTEGER PRIMARY KEY",
-    "name": "TEXT",
-    "age": "INTEGER"
-})
+### Advanced Querying
 
-db.insert("users", {"name": "Алиса", "age": 25})
-db.insert("users", {"name": "Боб", "age": 30})
-db.insert("users", {"name": "Чарли", "age": 35})
-
-users = db.select("users", where="age > 20")
-print("Пользователи старше 20 лет:")
-for user in users:
-    print(user)
-
-db.update("users", {"age": 26}, where="name = 'Алиса'")
-
-updated_users = db.select("users", where="name = 'Алиса'")
-print("\nОбновленные данные Алисы:")
-for user in updated_users:
-    print(user)
-
-db.delete("users", where="age < 18")
-
-db.close()
+```python
+# Complex query with sorting and pagination
+results = db.select(
+    "orders",
+    where="customer_id = ? AND date > ?",
+    params=(123, "2023-01-01"),
+    columns=["id", "total", "status"],
+    order_by="total DESC",
+    limit=10,
+    offset=5
+)
 ```
 
 ## Contributing
 
-### Contributions are welcome! Please open an issue or submit a pull request on GitHub.
+Contributions are welcome! Please open an issue or submit a pull request on GitHub.
 
 ## License
 
-### This project is licensed under the MIT License.
+MIT License
 
 ---
 
 ## Русский <a name="русский"></a>
 
-QuickSQL3 — это библиотека на Python, предназначенная для упрощения работы с базами данных SQLite. Она предоставляет
-интуитивно понятный API для выполнения таких операций, как создание таблиц, вставка данных, запросы, обновление и
-удаление записей. Библиотека идеально подходит для новичков или тех, кто хочет избежать написания сырых SQL-запросов.
+QuickSQL3 — это Python-библиотека для удобной работы с базами данных SQLite. Она предоставляет как синхронный, так и асинхронный API для выполнения стандартных операций с базой данных без необходимости писать сырые SQL-запросы.
 
 ## Возможности
 
-- **Простой API**: Легко создавайте таблицы, вставляйте данные и выполняйте запросы без написания SQL.
-- **Обработка ошибок**: Встроенная обработка ошибок для упрощения отладки.
-- **Гибкость**: Поддержка как синхронных, так и асинхронных операций.
-- **Типизация**: Полная поддержка аннотаций типов для улучшения читаемости кода и поддержки IDE.
+- **Двойной API**: На выбор синхронный (`Database`) и асинхронный (`AsyncDatabase`) интерфейсы
+- **Полный CRUD**: Создание, чтение, обновление и удаление данных простыми методами
+- **Управление схемой**: Создание таблиц, изменение столбцов, переименование таблиц
+- **Типизация**: Полная поддержка аннотаций типов для удобства разработки
+- **Обработка ошибок**: Встроенная система обработки ошибок с детальным логированием
+- **Гибкие запросы**: Поддержка условий WHERE, параметризованных запросов, сортировки и пагинации
 
 ## Установка
 
-Установите библиотеку с помощью pip:
+Установка через pip:
 
 ```bash
 pip install QuickSQL3
@@ -130,80 +143,78 @@ pip install QuickSQL3
 
 ## Документация
 
-### Синхронные методы
+### Синхронный API (`Database`)
 
 ```python
 from QuickSQL3 import Database
 
-create_table(table_name: str, columns: Dict[str, str]) -> None
+# Инициализация базы данных
+db = Database("app.db")
 
-insert(table_name: str, data: Dict[str, Any]) -> None
+# Операции с таблицами
+db.create_table("пользователи", {"id": "INTEGER PRIMARY KEY", "имя": "TEXT"})
+db.edit_table_name("пользователи", "клиенты")
+db.add_column("клиенты", {"email": "TEXT UNIQUE"})
 
-select(table_name: str, where: Optional[str] = None) -> List[Dict[str, Any]]
+# Операции с данными
+row_id = db.insert("клиенты", {"имя": "Алиса", "email": "alice@example.com"})
+results = db.select("клиенты", where="имя LIKE ?", params=("А%",))
+db.update("клиенты", {"email": "new@example.com"}, where="id = ?", params=(row_id,))
+db.delete("клиенты", where="id = ?", params=(row_id,))
 
-update(table_name: str, data: Dict[str, Any], where: str) -> None
-
-delete(table_name: str, where: str) -> None
-
-close() -> None
+# Закрытие соединения
+db.close()
 ```
 
-### Асинхронные методы
+### Асинхронный API (`AsyncDatabase`)
 
 ```python
 from QuickSQL3 import AsyncDatabase
 
-create_table(table_name: str, columns: Dict[str, str]) -> None
-
-insert(table_name: str, data: Dict[str, Any]) -> None
-
-select(table_name: str, where: Optional[str] = None) -> List[Dict[str, Any]]
-
-update(table_name: str, data: Dict[str, Any], where: str) -> None
-
-delete(table_name: str, where: str) -> None
-
-close() -> None
+async def main():
+    # Инициализация базы данных
+    db = AsyncDatabase("app.db")
+    await db.connect()
+    
+    # Операции с таблицами
+    await db.create_table("товары", {"id": "INTEGER PRIMARY KEY", "название": "TEXT"})
+    await db.edit_column_name("товары", "название", "имя_товара")
+    
+    # Операции с данными
+    await db.insert("товары", {"имя_товара": "Ноутбук"})
+    results = await db.select("товары")
+    
+    # Закрытие соединения
+    await db.close()
 ```
 
-## Пример
+## Примеры
+
+### Базовое использование
 
 ```python
 from QuickSQL3 import Database
 
-db = Database("app.db")
+with Database("example.db") as db:
+    # Создание таблицы
+    db.create_table("сотрудники", {
+        "id": "INTEGER PRIMARY KEY",
+        "имя": "TEXT NOT NULL",
+        "зарплата": "REAL"
+    })
+    
+    # Вставка данных
+    db.insert("сотрудники", {"имя": "Иван Иванов", "зарплата": 75000.50})
 
-db.create_table("users", {
-    "id": "INTEGER PRIMARY KEY",
-    "name": "TEXT",
-    "age": "INTEGER"
-})
-
-db.insert("users", {"name": "Алиса", "age": 25})
-db.insert("users", {"name": "Боб", "age": 30})
-db.insert("users", {"name": "Чарли", "age": 35})
-
-users = db.select("users", where="age > 20")
-print("Пользователи старше 20 лет:")
-for user in users:
-    print(user)
-
-db.update("users", {"age": 26}, where="name = 'Алиса'")
-
-updated_users = db.select("users", where="name = 'Алиса'")
-print("\nОбновленные данные Алисы:")
-for user in updated_users:
-    print(user)
-
-db.delete("users", where="age < 18")
-
-db.close()
+    # Запрос данных
+    employees = db.select("сотрудники", where="зарплата > ?", params=(50000,))
+    print(employees)
 ```
 
 ## Участие
 
-### Мы приветствуем ваши contributions! Пожалуйста, создайте issue или отправьте pull request на GitHub.
+Приветствуются contributions! Создавайте issue или отправляйте pull request на GitHub.
 
 ## Лицензия
 
-### Этот проект лицензирован под MIT License.
+MIT License
